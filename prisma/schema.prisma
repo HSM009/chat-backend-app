@@ -1,0 +1,178 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id             String                    @id @default(cuid())
+  phone          String                    @unique
+  name           String
+  password       String
+  createdAt      DateTime                  @default(now())
+  isOnline       Boolean                   @default(false)
+  lastSeen       DateTime?
+  conversations  ConversationParticipant[]
+  sentMessages   Message[]                 @relation("SentMessages")
+  reactions      MessageReaction[]
+  readMessages   MessageRead[]
+  pinnedMessages PinnedMessage[]
+  deliveries     MessageDelivery[]
+  mentions       MessageMention[]
+  bookmarks      MessageBookmark[]
+}
+
+model Conversation {
+  id             String                    @id @default(cuid())
+  createdAt      DateTime                  @default(now())
+  updatedAt      DateTime                  @updatedAt
+  lastMessageAt  DateTime?
+  pinnedMessages PinnedMessage[]
+  participants   ConversationParticipant[]
+  messages       Message[]                 @relation("ConversationMessages")
+  message        Message?                  @relation(fields: [messageId], references: [id])
+  messageId      String?
+  name           String?
+  imageUrl       String?
+  isGroup        Boolean                   @default(false)
+}
+
+model ConversationParticipant {
+  conversationId String
+  userId         String
+  joinedAt       DateTime  @default(now())
+  mutedUntil     DateTime?
+  archivedAt     DateTime?
+
+  conversation Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role         ConversationRole @default(MEMBER)
+
+  @@id([conversationId, userId])
+}
+
+model Message {
+  id             String               @id @default(cuid())
+  conversationId String
+  senderId       String
+  type           MessageType          @default(TEXT)
+  text           String?
+  fileUrl        String?
+  fileName       String?
+  mimeType       String?
+  fileSize       Int?
+  replyToId      String?
+  forwarded      Boolean              @default(false)
+  createdAt      DateTime             @default(now())
+  editedAt       DateTime?
+  deletedAt      DateTime?
+  conversation   Conversation         @relation("ConversationMessages", fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User                 @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  reactions      MessageReaction[]
+  reads          MessageRead[]
+  replyTo        Message?             @relation("MessageReplies", fields: [replyToId], references: [id])
+  pinnedMessages PinnedMessage[]
+  replies        Message[]            @relation("MessageReplies")
+  conversations  Conversation[]
+  deliveries     MessageDelivery[]
+  mentions       MessageMention[]
+  bookmarks      MessageBookmark[]
+  editHistory    MessageEditHistory[]
+}
+
+model MessageReaction {
+  messageId String
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+  message   Message  @relation(fields: [messageId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@id([messageId, userId])
+}
+
+model MessageRead {
+  messageId String
+  userId    String
+  readAt    DateTime @default(now())
+  message   Message  @relation(fields: [messageId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@id([messageId, userId])
+}
+
+model PinnedMessage {
+  conversationId String
+  messageId      String
+  pinnedById     String
+  pinnedAt       DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  message        Message      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [pinnedById], references: [id], onDelete: Cascade)
+
+  @@id([conversationId, messageId])
+}
+
+model MessageDelivery {
+  messageId String
+  userId    String
+
+  deliveredAt DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@id([messageId, userId])
+}
+
+model MessageMention {
+  messageId String
+  userId    String
+
+  createdAt DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, userId])
+}
+
+model MessageBookmark {
+  messageId String
+  userId    String
+
+  createdAt DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, userId])
+}
+
+model MessageEditHistory {
+  id String @id @default(cuid())
+
+  messageId String
+
+  oldText String?
+
+  editedAt DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  VIDEO
+  AUDIO
+  FILE
+}
+
+enum ConversationRole {
+  ADMIN
+  MEMBER
+}
