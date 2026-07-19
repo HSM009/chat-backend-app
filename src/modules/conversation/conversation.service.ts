@@ -1,4 +1,7 @@
 import { prisma } from "../../config/prisma.js";
+import { invalidateUserConversations } from "../../lib/cache.invalidation.js";
+import { cacheGet, cacheSet } from "../../lib/cache.js";
+import { CacheKeys } from "../../lib/cache.keys.js";
 import { connectionManager } from "../../websocket/connection-manager.js";
 import { WebSocketEvents } from "../../websocket/events.js";
 import { ensureParticipant } from "./conversation.helpers.js";
@@ -31,9 +34,10 @@ export async function createConversation(
   if (!otherUser) {
     throw new Error("User not found.");
   }
-
+  await invalidateUserConversations(currentUserId);
   const existingConversation = await prisma.conversation.findFirst({
     where: {
+      isGroup: false,
       AND: [
         {
           participants: {
@@ -74,12 +78,23 @@ export async function createConversation(
         },
       ],
     });
+    await Promise.all([
+      invalidateUserConversations(currentUserId),
+      invalidateUserConversations(data.userId),
+    ]);
 
     return conversation;
   });
 }
 
 export async function getMyConversations(currentUserId: string) {
+  const key = CacheKeys.userConversations(currentUserId);
+
+  const cached = await cacheGet<any[]>(key);
+
+  if (cached) {
+    return cached;
+  }
   const conversations = await prisma.conversation.findMany({
     where: {
       participants: {
@@ -131,6 +146,7 @@ export async function getMyConversations(currentUserId: string) {
       };
     }),
   );
+  await cacheSet(key, conversations, 60);
 
   return result;
 }
@@ -468,6 +484,12 @@ export async function leaveGroup(
 
     return;
   }
+  await Promise.all([
+    invalidateUserConversations(currentUserId),
+    ...result.remaining.map((member) =>
+      invalidateUserConversations(member.userId),
+    ),
+  ]);
 
   for (const member of result.remaining) {
     connectionManager.send(member.userId, WebSocketEvents.GROUP_LEFT, {
@@ -662,6 +684,7 @@ export async function muteConversation(
       mutedUntil: data.mutedUntil,
     },
   });
+  await invalidateUserConversations(currentUserId);
   return participant;
 }
 
@@ -682,7 +705,7 @@ export async function archiveConversation(
       archivedAt: data.archived ? new Date() : null,
     },
   });
-
+  await invalidateUserConversations(currentUserId);
   return participant;
 }
 
@@ -721,6 +744,7 @@ export async function searchConversations(
       ],
     },
   });
+
   return conversations;
 }
 export async function getUnreadCount(

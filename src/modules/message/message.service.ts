@@ -8,6 +8,7 @@ import type {
 import { connectionManager } from "../../websocket/connection-manager.js";
 import { WebSocketEvents } from "../../websocket/events.js";
 import { MessageType } from "../../generated/prisma/enums.js";
+import { invalidateUserConversations } from "../../lib/cache.invalidation.js";
 
 async function ensureParticipant(
   currentUserId: string,
@@ -55,7 +56,7 @@ export async function sendMessage(
     }
   }
 
-  if (data.mentions.length > 0) {
+  if (data.mentions.length) {
     const mentionedUsers = await prisma.conversationParticipant.findMany({
       where: {
         conversationId,
@@ -118,7 +119,7 @@ export async function sendMessage(
       },
     });
 
-    const message = await tx.message.findUnique({
+    const message = await tx.message.findUniqueOrThrow({
       where: {
         id: createdMessage.id,
       },
@@ -160,10 +161,16 @@ export async function sendMessage(
     });
 
     return {
-      message: message!,
+      message,
       participants,
     };
   });
+
+  await Promise.all(
+    participants.map((participant) =>
+      invalidateUserConversations(participant.userId),
+    ),
+  );
 
   for (const participant of participants) {
     if (participant.userId === currentUserId) {
@@ -177,7 +184,7 @@ export async function sendMessage(
     );
   }
 
-  for (const userId of data.mentions) {
+  for (const userId of data.mentions ?? []) {
     if (userId === currentUserId) {
       continue;
     }
