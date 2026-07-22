@@ -21,6 +21,7 @@ import {
   bookmarkMessage,
   removeBookmark,
   getMessageHistory,
+  markMessageAsDelivered,
 } from "./message.service.js";
 import {
   getMessagesQuerySchema,
@@ -393,6 +394,32 @@ export default async function messageRoutes(app: FastifyInstance) {
         return reply.status(400).send({
           message:
             error instanceof Error ? error.message : "Unable to load history",
+        });
+      }
+    },
+  );
+  app.post(
+    "/:messageId/delivered",
+    {
+      preHandler: [authenticate],
+    },
+    async (request, reply) => {
+      try {
+        const currentUserId = request.user.sub;
+
+        const { messageId } = request.params as MessageParams;
+
+        const delivery = await markMessageAsDelivered(currentUserId, messageId);
+
+        return reply.send(delivery);
+      } catch (error) {
+        app.log.error(error);
+
+        return reply.status(400).send({
+          message:
+            error instanceof Error
+              ? error.message
+              : "Unable to mark message as delivered",
         });
       }
     },

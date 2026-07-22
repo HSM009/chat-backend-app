@@ -26,18 +26,20 @@ model User {
 }
 
 model Conversation {
-  id             String                    @id @default(cuid())
-  createdAt      DateTime                  @default(now())
-  updatedAt      DateTime                  @updatedAt
-  lastMessageAt  DateTime?
-  pinnedMessages PinnedMessage[]
-  participants   ConversationParticipant[]
-  messages       Message[]                 @relation("ConversationMessages")
-  message        Message?                  @relation(fields: [messageId], references: [id])
-  messageId      String?
-  name           String?
-  imageUrl       String?
-  isGroup        Boolean                   @default(false)
+  id              String                    @id @default(cuid())
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+  lastMessageAt   DateTime?
+  pinnedMessages  PinnedMessage[]
+  participants    ConversationParticipant[]
+  messages        Message[]                 @relation("ConversationMessages")
+  message         Message?                  @relation(fields: [messageId], references: [id])
+  messageId       String?
+  name            String?
+  imageUrl        String?
+  isGroup         Boolean                   @default(false)
+  inviteCode      String?                   @unique
+  inviteExpiresAt DateTime?
 }
 
 model ConversationParticipant {
@@ -73,7 +75,7 @@ model Message {
   sender         User                 @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
   reactions      MessageReaction[]
   reads          MessageRead[]
-  replyTo        Message?             @relation("MessageReplies", fields: [replyToId], references: [id])
+  replyTo        Message?             @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
   pinnedMessages PinnedMessage[]
   replies        Message[]            @relation("MessageReplies")
   conversations  Conversation[]
@@ -88,8 +90,8 @@ model MessageReaction {
   userId    String
   emoji     String
   createdAt DateTime @default(now())
-  message   Message  @relation(fields: [messageId], references: [id])
-  user      User     @relation(fields: [userId], references: [id])
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([messageId, userId])
 }
@@ -98,8 +100,8 @@ model MessageRead {
   messageId String
   userId    String
   readAt    DateTime @default(now())
-  message   Message  @relation(fields: [messageId], references: [id])
-  user      User     @relation(fields: [userId], references: [id])
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([messageId, userId])
 }
@@ -122,8 +124,8 @@ model MessageDelivery {
 
   deliveredAt DateTime @default(now())
 
-  message Message @relation(fields: [messageId], references: [id])
-  user    User    @relation(fields: [userId], references: [id])
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([messageId, userId])
 }
@@ -153,15 +155,11 @@ model MessageBookmark {
 }
 
 model MessageEditHistory {
-  id String @id @default(cuid())
-
+  id        String   @id @default(cuid())
   messageId String
-
-  oldText String?
-
-  editedAt DateTime @default(now())
-
-  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  oldText   String?
+  editedAt  DateTime @default(now())
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
 }
 
 enum MessageType {

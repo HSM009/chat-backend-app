@@ -1,15 +1,18 @@
 import { prisma } from "../../config/prisma.js";
+import { ConversationRole } from "../../generated/prisma/enums.js";
 import { invalidateUserConversations } from "../../lib/cache.invalidation.js";
 import { cacheGet, cacheSet } from "../../lib/cache.js";
 import { CacheKeys } from "../../lib/cache.keys.js";
 import { connectionManager } from "../../websocket/connection-manager.js";
 import { WebSocketEvents } from "../../websocket/events.js";
 import { ensureParticipant } from "./conversation.helpers.js";
+import crypto from "crypto";
 import {
   AddMemberInput,
   ArchiveConversationInput,
   CreateConversationInput,
   CreateGroupInput,
+  JoinGroupInput,
   MuteConversationInput,
   RenameGroupInput,
   SearchConversationQuery,
@@ -146,7 +149,7 @@ export async function getMyConversations(currentUserId: string) {
       };
     }),
   );
-  await cacheSet(key, conversations, 60);
+  await cacheSet(key, result, 60);
 
   return result;
 }
@@ -181,37 +184,36 @@ export async function createGroupConversation(
   const filteredParticipants = participants.filter(
     (id) => id !== currentUserId,
   );
-  return prisma.$transaction(async (tx) => {
+
+  const conversation = await prisma.$transaction(async (tx) => {
     const conversation = await tx.conversation.create({
       data: {
-        title: data.title,
-
+        name: data.name,
+        imageUrl: data.imageUrl,
         isGroup: true,
       },
     });
+
     await tx.conversationParticipant.create({
       data: {
         conversationId: conversation.id,
-
         userId: currentUserId,
-
         role: "ADMIN",
       },
     });
+
     await tx.conversationParticipant.createMany({
       data: filteredParticipants.map((userId) => ({
         conversationId: conversation.id,
-
         userId,
-
         role: "MEMBER",
       })),
     });
+
     return tx.conversation.findUnique({
       where: {
         id: conversation.id,
       },
-
       include: {
         participants: {
           include: {
@@ -226,8 +228,15 @@ export async function createGroupConversation(
       },
     });
   });
-}
 
+  await Promise.all(
+    [currentUserId, ...filteredParticipants].map((userId) =>
+      invalidateUserConversations(userId),
+    ),
+  );
+
+  return conversation;
+}
 export async function addMember(
   currentUserId: string,
   conversationId: string,
@@ -299,11 +308,21 @@ export async function addMember(
     },
   });
 
+  await Promise.all(
+    participants.map((participant) =>
+      invalidateUserConversations(participant.userId),
+    ),
+  );
+  const payload = {
+    conversationId,
+    addedUser: participant,
+    addedBy: currentUserId,
+  };
   for (const member of participants) {
     connectionManager.send(
       member.userId,
       WebSocketEvents.MEMBER_ADDED,
-      participant,
+      payload,
     );
   }
 
@@ -384,6 +403,12 @@ export async function removeMember(
     removedUserId: targetUserId,
     removedBy: currentUserId,
   };
+
+  await Promise.all([
+    invalidateUserConversations(currentUserId),
+    invalidateUserConversations(targetUserId),
+    ...participants.map((member) => invalidateUserConversations(member.userId)),
+  ]);
 
   for (const member of participants) {
     connectionManager.send(
@@ -556,6 +581,12 @@ export async function renameGroup(
     updatedBy: currentUserId,
   };
 
+  await Promise.all(
+    participants.map((participant) =>
+      invalidateUserConversations(participant.userId),
+    ),
+  );
+
   for (const participant of participants) {
     connectionManager.send(
       participant.userId,
@@ -607,6 +638,12 @@ export async function updateGroupImage(
     updatedBy: currentUserId,
   };
 
+  await Promise.all(
+    participants.map((participant) =>
+      invalidateUserConversations(participant.userId),
+    ),
+  );
+
   for (const participant of participants) {
     connectionManager.send(
       participant.userId,
@@ -657,6 +694,13 @@ export async function updateGroup(
     updatedBy: currentUserId,
     changes: data,
   };
+
+  await Promise.all(
+    participants.map((participant) =>
+      invalidateUserConversations(participant.userId),
+    ),
+  );
+
   for (const participant of participants) {
     connectionManager.send(
       participant.userId,
@@ -772,4 +816,292 @@ export async function getUnreadCount(
   return {
     unreadCount: count,
   };
+}
+export async function deleteConversation(
+  currentUserId: string,
+  conversationId: string,
+) {
+  await ensureAdmin(currentUserId, conversationId);
+
+  const conversation = await prisma.conversation.findUnique({
+    where: {
+      id: conversationId,
+    },
+    include: {
+      participants: {
+        select: {
+          userId: true,
+        },
+      },
+    },
+  });
+
+  if (!conversation) {
+    throw new Error("Conversation not found.");
+  }
+
+  await prisma.conversation.delete({
+    where: {
+      id: conversationId,
+    },
+  });
+
+  await Promise.all(
+    conversation.participants.map((participant) =>
+      invalidateUserConversations(participant.userId),
+    ),
+  );
+
+  for (const participant of conversation.participants) {
+    connectionManager.send(
+      participant.userId,
+      WebSocketEvents.CONVERSATION_DELETED,
+      {
+        conversationId,
+        deletedBy: currentUserId,
+      },
+    );
+  }
+
+  return {
+    success: true,
+    conversationId,
+  };
+}
+
+export async function changeMemberRole(
+  currentUserId: string,
+  conversationId: string,
+  targetUserId: string,
+  role: ConversationRole,
+) {
+  await ensureAdmin(currentUserId, conversationId);
+
+  const conversation = await prisma.conversation.findUnique({
+    where: {
+      id: conversationId,
+    },
+  });
+
+  if (!conversation) {
+    throw new Error("Conversation not found.");
+  }
+
+  if (!conversation.isGroup) {
+    throw new Error("Cannot change member roles in a direct conversation.");
+  }
+
+  if (currentUserId === targetUserId) {
+    throw new Error("You cannot change your own role.");
+  }
+
+  const participant = await prisma.conversationParticipant.findUnique({
+    where: {
+      conversationId_userId: {
+        conversationId,
+        userId: targetUserId,
+      },
+    },
+  });
+
+  if (!participant) {
+    throw new Error("Member not found.");
+  }
+
+  if (participant.role === role) {
+    throw new Error(
+      role === ConversationRole.ADMIN
+        ? "User is already an admin."
+        : "User is already a member.",
+    );
+  }
+
+  // Prevent removing the last admin
+  if (
+    participant.role === ConversationRole.ADMIN &&
+    role === ConversationRole.MEMBER
+  ) {
+    const adminCount = await prisma.conversationParticipant.count({
+      where: {
+        conversationId,
+        role: ConversationRole.ADMIN,
+      },
+    });
+
+    if (adminCount === 1) {
+      throw new Error("Cannot demote the last admin.");
+    }
+  }
+
+  const updated = await prisma.conversationParticipant.update({
+    where: {
+      conversationId_userId: {
+        conversationId,
+        userId: targetUserId,
+      },
+    },
+    data: {
+      role,
+    },
+  });
+
+  const participants = await prisma.conversationParticipant.findMany({
+    where: {
+      conversationId,
+    },
+    select: {
+      userId: true,
+    },
+  });
+
+  await Promise.all(
+    participants.map((participant) =>
+      invalidateUserConversations(participant.userId),
+    ),
+  );
+
+  const payload = {
+    conversationId,
+    userId: targetUserId,
+    role,
+    changedBy: currentUserId,
+  };
+
+  for (const member of participants) {
+    connectionManager.send(
+      member.userId,
+      WebSocketEvents.ADMIN_CHANGED,
+      payload,
+    );
+  }
+
+  return updated;
+}
+
+export async function generateInvite(
+  currentUserId: string,
+  conversationId: string,
+) {
+  await ensureAdmin(currentUserId, conversationId);
+
+  const conversation = await prisma.conversation.findUnique({
+    where: {
+      id: conversationId,
+    },
+  });
+
+  if (!conversation) {
+    throw new Error("Conversation not found.");
+  }
+
+  if (!conversation.isGroup) {
+    throw new Error("Invite links are only available for groups.");
+  }
+
+  const inviteCode = crypto.randomBytes(16).toString("hex");
+
+  const inviteExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+  return prisma.conversation.update({
+    where: {
+      id: conversationId,
+    },
+    data: {
+      inviteCode,
+      inviteExpiresAt,
+    },
+    select: {
+      inviteCode: true,
+      inviteExpiresAt: true,
+    },
+  });
+}
+
+export async function joinGroupByInvite(
+  currentUserId: string,
+  data: JoinGroupInput,
+) {
+  const conversation = await prisma.conversation.findFirst({
+    where: {
+      inviteCode: data.inviteCode,
+    },
+  });
+
+  if (!conversation) {
+    throw new Error("Invalid invite.");
+  }
+
+  if (!conversation.isGroup) {
+    throw new Error("Invalid invite.");
+  }
+
+  if (
+    conversation.inviteExpiresAt &&
+    conversation.inviteExpiresAt < new Date()
+  ) {
+    throw new Error("Invite has expired.");
+  }
+
+  const existing = await prisma.conversationParticipant.findUnique({
+    where: {
+      conversationId_userId: {
+        conversationId: conversation.id,
+        userId: currentUserId,
+      },
+    },
+  });
+
+  if (existing) {
+    throw new Error("Already a member.");
+  }
+
+  const { participant, participants } = await prisma.$transaction(
+    async (tx) => {
+      const participant = await tx.conversationParticipant.create({
+        data: {
+          conversationId: conversation.id,
+          userId: currentUserId,
+          role: "MEMBER",
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+      });
+
+      const participants = await tx.conversationParticipant.findMany({
+        where: {
+          conversationId: conversation.id,
+        },
+        select: {
+          userId: true,
+        },
+      });
+
+      return {
+        participant,
+        participants,
+      };
+    },
+  );
+
+  await Promise.all(
+    participants.map((participant) =>
+      invalidateUserConversations(participant.userId),
+    ),
+  );
+
+  for (const member of participants) {
+    connectionManager.send(
+      member.userId,
+      WebSocketEvents.MEMBER_ADDED,
+      participant,
+    );
+  }
+
+  return participant;
 }

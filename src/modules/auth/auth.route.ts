@@ -3,6 +3,7 @@ import { FastifyInstance } from "fastify";
 import { loginSchema, registerSchema } from "./auth.schema.js";
 import { loginUser, registerUser } from "./auth.service.js";
 import { authenticate } from "../../plugins/auth.js";
+import { prisma } from "../../config/prisma.js";
 
 export default async function authRoutes(app: FastifyInstance) {
   app.post("/register", async (request, reply) => {
@@ -40,12 +41,13 @@ export default async function authRoutes(app: FastifyInstance) {
     {
       preHandler: [authenticate],
     },
-    async (request, reply) => {
-      console.log("Profile route reached");
-
-      return {
-        message: "Profile works",
-      };
+    async (request) => {
+      const user = await prisma.user.findUnique({
+        where: {
+          id: request.user.sub,
+        },
+      });
+      return user;
     },
   );
 }

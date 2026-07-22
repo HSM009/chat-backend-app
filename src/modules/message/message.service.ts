@@ -365,15 +365,73 @@ export async function deleteMessage(currentUserId: string, messageId: string) {
     throw new Error("Message already deleted.");
   }
 
-  return prisma.message.update({
-    where: {
-      id: messageId,
+  const { deletedMessage, participants } = await prisma.$transaction(
+    async (tx) => {
+      const deletedMessage = await tx.message.update({
+        where: {
+          id: messageId,
+        },
+        data: {
+          deletedAt: new Date(),
+        },
+      });
+
+      const lastMessage = await tx.message.findFirst({
+        where: {
+          conversationId: message.conversationId,
+          deletedAt: null,
+        },
+        orderBy: {
+          createdAt: "desc",
+        },
+      });
+
+      await tx.conversation.update({
+        where: {
+          id: message.conversationId,
+        },
+        data: {
+          lastMessageAt: lastMessage?.createdAt ?? null,
+        },
+      });
+
+      const participants = await tx.conversationParticipant.findMany({
+        where: {
+          conversationId: message.conversationId,
+        },
+        select: {
+          userId: true,
+        },
+      });
+
+      return {
+        deletedMessage,
+        participants,
+      };
     },
-    data: {
-      deletedAt: new Date(),
-    },
-  });
+  );
+
+  await Promise.all(
+    participants.map((participant) =>
+      invalidateUserConversations(participant.userId),
+    ),
+  );
+
+  for (const participant of participants) {
+    connectionManager.send(
+      participant.userId,
+      WebSocketEvents.MESSAGE_DELETED,
+      {
+        conversationId: message.conversationId,
+        messageId: deletedMessage.id,
+        deletedAt: deletedMessage.deletedAt,
+      },
+    );
+  }
+
+  return deletedMessage;
 }
+
 export async function reactToMessage(
   currentUserId: string,
   messageId: string,
@@ -479,7 +537,7 @@ export async function forwardMessage(
         fileName: original.fileName,
         mimeType: original.mimeType,
         fileSize: original.fileSize,
-        replyToId: original.replyToId,
+        replyToId: null,
       },
 
       include: {
@@ -511,6 +569,13 @@ export async function forwardMessage(
     });
     return { forwarded, participants };
   });
+
+  await Promise.all(
+    participants.map((participant) =>
+      invalidateUserConversations(participant.userId),
+    ),
+  );
+
   for (const participant of participants) {
     if (participant.userId === currentUserId) {
       continue;
@@ -962,7 +1027,7 @@ export async function getMessageHistory(
     },
 
     orderBy: {
-      editedAt: "desc",
+      editedAt: "asc",
     },
   });
 
@@ -970,4 +1035,47 @@ export async function getMessageHistory(
     history,
     total: history.length,
   };
+}
+
+export async function markMessageAsDelivered(
+  currentUserId: string,
+  messageId: string,
+) {
+  const message = await prisma.message.findUnique({
+    where: {
+      id: messageId,
+    },
+  });
+
+  if (!message) {
+    throw new Error("Message not found.");
+  }
+
+  await ensureParticipant(currentUserId, message.conversationId);
+
+  if (message.senderId === currentUserId) {
+    throw new Error("You cannot deliver your own message.");
+  }
+
+  const delivery = await prisma.messageDelivery.upsert({
+    where: {
+      messageId_userId: {
+        messageId,
+        userId: currentUserId,
+      },
+    },
+    create: {
+      messageId,
+      userId: currentUserId,
+    },
+    update: {},
+  });
+
+  connectionManager.send(message.senderId, WebSocketEvents.MESSAGE_DELIVERED, {
+    messageId,
+    userId: currentUserId,
+    deliveredAt: delivery.deliveredAt,
+  });
+
+  return delivery;
 }

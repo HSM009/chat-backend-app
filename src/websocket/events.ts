@@ -40,6 +40,8 @@ export const WebSocketEvents = {
   USER_STOPPED_TYPING: "user:stoppedTyping",
 
   MESSAGE_MENTION: "message:mention",
+
+  CONVERSATION_DELETED: "conversation:deleted",
 } as const;
 
 export type WebSocketEvent =

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ConversationRole } from "../../generated/prisma/enums.js";
 
 export const createConversationSchema = z.object({
   userId: z.string().cuid(),
@@ -7,7 +8,8 @@ export const createConversationSchema = z.object({
 export type CreateConversationInput = z.infer<typeof createConversationSchema>;
 
 export const createGroupSchema = z.object({
-  title: z.string().trim().min(2).max(100),
+  name: z.string().trim().min(2).max(100),
+  imageUrl: z.string().url().optional(),
 
   participants: z.array(z.string().cuid()).min(2),
 });
@@ -65,3 +67,16 @@ export const searchConversationQuerySchema = z.object({
 export type SearchConversationQuery = z.infer<
   typeof searchConversationQuerySchema
 >;
+
+export const changeMemberRoleSchema = z.object({
+  userId: z.string().cuid(),
+  role: z.enum(ConversationRole),
+});
+
+export type ChangeMemberRoleInput = z.infer<typeof changeMemberRoleSchema>;
+
+export const joinGroupSchema = z.object({
+  inviteCode: z.string().min(8),
+});
+
+export type JoinGroupInput = z.infer<typeof joinGroupSchema>;

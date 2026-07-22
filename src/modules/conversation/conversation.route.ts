@@ -4,8 +4,10 @@ import { authenticate } from "../../plugins/auth.js";
 import {
   addMemberSchema,
   archiveConversationSchema,
+  changeMemberRoleSchema,
   createConversationSchema,
   createGroupSchema,
+  joinGroupSchema,
   muteConversationSchema,
   renameGroupSchema,
   searchConversationQuerySchema,
@@ -15,10 +17,14 @@ import {
 import {
   addMember,
   archiveConversation,
+  changeMemberRole,
   createConversation,
   createGroupConversation,
+  deleteConversation,
+  generateInvite,
   getMyConversations,
   getUnreadCount,
+  joinGroupByInvite,
   leaveGroup,
   muteConversation,
   removeMember,
@@ -28,7 +34,10 @@ import {
   updateGroupImage,
 } from "./conversation.service.js";
 import { getPinnedMessages } from "../message/message.service.js";
-
+import { ConversationRole } from "../../generated/prisma/enums.js";
+type ConversationParams = {
+  conversationId: string;
+};
 export default async function conversationRoutes(app: FastifyInstance) {
   app.post(
     "/",
@@ -412,6 +421,119 @@ export default async function conversationRoutes(app: FastifyInstance) {
             error instanceof Error
               ? error.message
               : "Failed to get unread count.",
+        });
+      }
+    },
+  );
+  app.delete(
+    "/:conversationId",
+    {
+      preHandler: [authenticate],
+    },
+    async (request, reply) => {
+      try {
+        const currentUserId = request.user.sub;
+
+        const { conversationId } = request.params as ConversationParams;
+
+        const result = await deleteConversation(currentUserId, conversationId);
+
+        return reply.send(result);
+      } catch (error) {
+        app.log.error(error);
+
+        return reply.status(400).send({
+          message:
+            error instanceof Error
+              ? error.message
+              : "Failed to delete conversation",
+        });
+      }
+    },
+  );
+  app.post(
+    "/:conversationId/role",
+    {
+      preHandler: [authenticate],
+    },
+    async (request, reply) => {
+      try {
+        const currentUserId = request.user.sub;
+
+        const { conversationId } = request.params as {
+          conversationId: string;
+        };
+
+        const body = changeMemberRoleSchema.parse(request.body);
+
+        const result = await changeMemberRole(
+          currentUserId,
+          conversationId,
+          body.userId,
+          body.role,
+        );
+
+        return reply.send(result);
+      } catch (error) {
+        app.log.error(error);
+
+        return reply.status(400).send({
+          message:
+            error instanceof Error
+              ? error.message
+              : "Failed to change member role.",
+        });
+      }
+    },
+  );
+  app.post(
+    "/:conversationId/invite",
+    {
+      preHandler: [authenticate],
+    },
+    async (request, reply) => {
+      try {
+        const currentUserId = request.user.sub;
+
+        const { conversationId } = request.params as {
+          conversationId: string;
+        };
+
+        const invite = await generateInvite(currentUserId, conversationId);
+
+        return reply.send(invite);
+      } catch (error) {
+        app.log.error(error);
+
+        return reply.status(400).send({
+          message:
+            error instanceof Error
+              ? error.message
+              : "Failed to generate invite.",
+        });
+      }
+    },
+  );
+  app.post(
+    "/join",
+    {
+      preHandler: [authenticate],
+    },
+    async (request, reply) => {
+      try {
+        const currentUserId = request.user.sub;
+
+        const body = joinGroupSchema.parse(request.body);
+
+        const participant = await joinGroupByInvite(currentUserId, body);
+
+        return reply.send(participant);
+      } catch (error) {
+        app.log.error(error);
+
+        return reply.status(400).send({
+          message:
+            error instanceof Error ? error.message : "Failed to join group.",
         });
       }
     },
