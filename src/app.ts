@@ -9,6 +9,7 @@ import authRoutes from "./modules/auth/auth.route.js";
 import conversationRoutes from "./modules/conversation/conversation.route.js";
 import messageRoutes from "./modules/message/message.route.js";
 import uploadRoutes from "./modules/upload/upload.route.js";
+import userRoutes from "./modules/user/user.route.js";
 
 export async function buildApp() {
   const app = Fastify({
@@ -44,6 +45,10 @@ export async function buildApp() {
 
   await app.register(uploadRoutes, {
     prefix: "/uploads",
+  });
+
+  await app.register(userRoutes, {
+    prefix: "/users",
   });
 
   console.log(app.printRoutes());

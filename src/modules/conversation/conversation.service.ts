@@ -91,13 +91,13 @@ export async function createConversation(
 }
 
 export async function getMyConversations(currentUserId: string) {
-  const key = CacheKeys.userConversations(currentUserId);
+  // const key = CacheKeys.userConversations(currentUserId);
 
-  const cached = await cacheGet<any[]>(key);
+  // const cached = await cacheGet<any[]>(key);
 
-  if (cached) {
-    return cached;
-  }
+  // if (cached) {
+  //   return cached;
+  // }
   const conversations = await prisma.conversation.findMany({
     where: {
       participants: {
@@ -123,6 +123,15 @@ export async function getMyConversations(currentUserId: string) {
           },
         },
       },
+      message: {
+        select: {
+          id: true,
+          text: true,
+          createdAt: true,
+          senderId: true,
+          type: true,
+        },
+      },
     },
   });
 
@@ -144,12 +153,18 @@ export async function getMyConversations(currentUserId: string) {
       });
 
       return {
-        ...conversation,
+        id: conversation.id,
+        name: conversation.name,
+        imageUrl: conversation.imageUrl,
+        isGroup: conversation.isGroup,
+        lastMessageAt: conversation.lastMessageAt,
+        participants: conversation.participants,
+        lastMessage: conversation.message,
         unreadCount,
       };
     }),
   );
-  await cacheSet(key, result, 60);
+  // await cacheSet(key, result, 60);
 
   return result;
 }
