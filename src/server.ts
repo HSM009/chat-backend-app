@@ -6,7 +6,7 @@ import { redis } from "./config/redis.js";
 
 const app = await buildApp();
 
-// await redis.connect();
+await redis.connect();
 
 await app.listen({
   host: "0.0.0.0",

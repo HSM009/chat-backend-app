@@ -9,7 +9,7 @@ export const sendMessageSchema = z
     fileName: z.string().optional(),
     mimeType: z.string().optional(),
     fileSize: z.number().optional(),
-    replyToId: z.string().cuid().optional(),
+    replyToId: z.string().nullable().optional(),
     mentions: z.array(z.string().cuid()).default([]),
   })
   .superRefine((data, ctx) => {
