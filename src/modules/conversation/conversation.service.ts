@@ -151,7 +151,13 @@ export async function getMyConversations(currentUserId: string) {
           },
         },
       });
-
+      console.log(
+        conversation.id,
+        " +  messageID",
+        conversation.messageId,
+        " + ",
+        conversation.message,
+      );
       return {
         id: conversation.id,
         name: conversation.name,

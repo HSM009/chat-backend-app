@@ -36,7 +36,6 @@ export async function sendMessage(
   data: SendMessageInput,
 ) {
   await ensureParticipant(currentUserId, conversationId);
-
   // Validate reply
   if (data.replyToId) {
     const replyTo = await prisma.message.findUnique({
@@ -107,6 +106,7 @@ export async function sendMessage(
       },
       data: {
         lastMessageAt: createdMessage.createdAt,
+        messageId: createdMessage.id,
       },
     });
 
@@ -130,7 +130,7 @@ export async function sendMessage(
             name: true,
           },
         },
-
+        reads: true,
         mentions: {
           include: {
             user: {
@@ -159,7 +159,7 @@ export async function sendMessage(
         },
       },
     });
-
+    console.log(JSON.stringify(message, null, 2));
     return {
       message,
       participants,
@@ -177,11 +177,11 @@ export async function sendMessage(
       continue;
     }
 
-    connectionManager.send(
-      participant.userId,
-      WebSocketEvents.MESSAGE_NEW,
+    connectionManager.send(participant.userId, WebSocketEvents.MESSAGE_NEW, {
+      conversationId,
       message,
-    );
+      lastMessageAt: message.createdAt,
+    });
   }
 
   for (const userId of data.mentions ?? []) {
@@ -487,7 +487,7 @@ export async function markMessageAsRead(
   }
   await ensureParticipant(currentUserId, message.conversationId);
 
-  return prisma.messageRead.upsert({
+  const read = await prisma.messageRead.upsert({
     where: {
       messageId_userId: {
         messageId,
@@ -502,6 +502,16 @@ export async function markMessageAsRead(
       userId: currentUserId,
     },
   });
+  const senderId = message.senderId;
+
+  if (senderId !== currentUserId) {
+    connectionManager.send(senderId, WebSocketEvents.READ_RECEIPT, {
+      messageId,
+      userId: currentUserId,
+      readAt: read.readAt,
+    });
+  }
+  return read;
 }
 
 export async function forwardMessage(
