@@ -1,0 +1,16 @@
+name: Test Alpine Runner
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: self-hosted
+
+    steps:
+      - name: Check Runner
+        run: |
+          echo "Running on Alpine"
+          hostname
+          docker ps
+          ls -la /workspace
