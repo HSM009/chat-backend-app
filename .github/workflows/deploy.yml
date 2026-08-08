@@ -18,23 +18,28 @@ jobs:
           DEPLOY_DIR="/home/hsm/chatting-app/deployments/chat-backend-app"
           COMPOSE_DIR="/home/hsm/chatting-app/deployments"
 
-          echo "Deploying latest backend..."
+          echo "================================="
+          echo "Starting backend deployment"
+          echo "================================="
 
           cd "$DEPLOY_DIR"
 
+          echo "Fetching latest code..."
           git fetch origin main
+
+          echo "Updating working tree..."
           git reset --hard origin/main
 
-          echo "Building backend Docker image..."
-
+          echo "Building backend..."
           cd "$COMPOSE_DIR"
-
           docker compose build backend
 
           echo "Starting backend..."
-
           docker compose up -d backend
 
-          echo "Deployment completed."
+          echo "Checking backend..."
+          docker ps --filter "name=chat-backend"
 
-          docker ps
+          echo "================================="
+          echo "Deployment completed"
+          echo "================================="
