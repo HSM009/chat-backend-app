@@ -1,0 +1,40 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+
+    steps:
+      - name: Deploy latest code
+        shell: bash
+        run: |
+          set -e
+
+          DEPLOY_DIR="/home/hsm/chatting-app/deployments/chat-backend-app"
+          COMPOSE_DIR="/home/hsm/chatting-app/deployments"
+
+          echo "Deploying latest backend..."
+
+          cd "$DEPLOY_DIR"
+
+          git fetch origin main
+          git reset --hard origin/main
+
+          echo "Building backend Docker image..."
+
+          cd "$COMPOSE_DIR"
+
+          docker compose build backend
+
+          echo "Starting backend..."
+
+          docker compose up -d backend
+
+          echo "Deployment completed."
+
+          docker ps
