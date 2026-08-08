@@ -12,7 +12,7 @@ jobs:
     steps:
       - name: Deploy backend
         run: |
-          set -eux
+          set -e
 
           DEPLOY_DIR="/workspace/deployments/chat-backend-app"
           COMPOSE_DIR="/workspace/deployments"
