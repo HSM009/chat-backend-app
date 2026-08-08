@@ -1,45 +1,35 @@
-name: Deploy Backend
+- name: Deploy backend
+  run: |
+    set -e
 
-on:
-  push:
-    branches:
-      - main
+    DEPLOY_DIR="/workspace/deployments/chat-backend-app"
+    COMPOSE_DIR="/workspace/deployments"
 
-jobs:
-  deploy:
-    runs-on: self-hosted
+    echo "================================="
+    echo "Starting backend deployment"
+    echo "================================="
 
-    steps:
-      - name: Deploy latest code
-        shell: bash
-        run: |
-          set -e
+    echo "Deployment directory:"
+    ls -la "$DEPLOY_DIR"
 
-          DEPLOY_DIR="/home/hsm/chatting-app/deployments/chat-backend-app"
-          COMPOSE_DIR="/home/hsm/chatting-app/deployments"
+    cd "$DEPLOY_DIR"
 
-          echo "================================="
-          echo "Starting backend deployment"
-          echo "================================="
+    echo "Fetching latest code..."
+    git fetch origin main
 
-          cd "$DEPLOY_DIR"
+    echo "Updating working tree..."
+    git reset --hard origin/main
 
-          echo "Fetching latest code..."
-          git fetch origin main
+    echo "Building backend..."
+    cd "$COMPOSE_DIR"
+    docker compose build backend
 
-          echo "Updating working tree..."
-          git reset --hard origin/main
+    echo "Starting backend..."
+    docker compose up -d backend
 
-          echo "Building backend..."
-          cd "$COMPOSE_DIR"
-          docker compose build backend
+    echo "Checking backend..."
+    docker ps --filter "name=chat-backend"
 
-          echo "Starting backend..."
-          docker compose up -d backend
-
-          echo "Checking backend..."
-          docker ps --filter "name=chat-backend"
-
-          echo "================================="
-          echo "Deployment completed"
-          echo "================================="
+    echo "================================="
+    echo "Backend deployment completed"
+    echo "================================="
