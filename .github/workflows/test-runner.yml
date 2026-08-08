@@ -10,7 +10,7 @@ jobs:
     steps:
       - name: Check Runner
         run: |
-          echo "Running on Alpine"
+          echo "Running on HSM-Alpine"
           hostname
           docker ps
           ls -la /workspace
