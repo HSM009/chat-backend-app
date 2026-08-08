@@ -8,6 +8,11 @@ import {
   setUserOnline,
 } from "../modules/user/presence.service.js";
 import { verifyWebSocketToken } from "./auth.js";
+import {
+  sendAnswer,
+  sendIceCandidate,
+  sendOffer,
+} from "../modules/call/call.signal.js";
 
 export default async function websocketRoutes(app: FastifyInstance) {
   app.get(
@@ -62,6 +67,26 @@ export default async function websocketRoutes(app: FastifyInstance) {
                     data.payload.conversationId,
                     data.payload.typing,
                   );
+                  break;
+
+                case WebSocketEvents.WEBRTC_OFFER:
+                  sendOffer(data.payload.receiverId, {
+                    callerId: userId,
+                    conversationId: data.payload.conversationId,
+                    offer: data.payload.offer,
+                  });
+                  break;
+
+                case WebSocketEvents.WEBRTC_ANSWER:
+                  sendAnswer(data.payload.receiverId, {
+                    answer: data.payload.answer,
+                  });
+                  break;
+
+                case WebSocketEvents.WEBRTC_ICE:
+                  sendIceCandidate(data.payload.receiverId, {
+                    candidate: data.payload.candidate,
+                  });
                   break;
 
                 default:

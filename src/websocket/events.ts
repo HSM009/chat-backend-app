@@ -42,6 +42,28 @@ export const WebSocketEvents = {
   MESSAGE_MENTION: "message:mention",
 
   CONVERSATION_DELETED: "conversation:deleted",
+
+  MESSAGE_REACTION: "message:reaction",
+
+  CALL_INVITE: "call:invite",
+
+  CALL_RINGING: "call:ringing",
+
+  CALL_ACCEPT: "call:accept",
+
+  CALL_REJECT: "call:reject",
+
+  CALL_END: "call:end",
+
+  CALL_BUSY: "call:busy",
+
+  CALL_OFFER: "call:offer",
+  CALL_ANSWER: "call:answer",
+  CALL_ICE: "call:ice",
+
+  WEBRTC_OFFER: "webrtc:offer",
+  WEBRTC_ANSWER: "webrtc:answer",
+  WEBRTC_ICE: "webrtc:ice",
 } as const;
 
 export type WebSocketEvent =

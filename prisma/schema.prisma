@@ -23,6 +23,9 @@ model User {
   deliveries     MessageDelivery[]
   mentions       MessageMention[]
   bookmarks      MessageBookmark[]
+  callerCalls    Call[]                    @relation("CallerCalls")
+
+  receiverCalls Call[] @relation("ReceiverCalls")
 }
 
 model Conversation {
@@ -40,6 +43,7 @@ model Conversation {
   isGroup         Boolean                   @default(false)
   inviteCode      String?                   @unique
   inviteExpiresAt DateTime?
+  call            Call[]
 }
 
 model ConversationParticipant {
@@ -173,4 +177,27 @@ enum MessageType {
 enum ConversationRole {
   ADMIN
   MEMBER
+}
+
+model Call {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  callerId       String
+  caller         User         @relation("CallerCalls", fields: [callerId], references: [id])
+  receiverId     String
+  receiver       User         @relation("ReceiverCalls", fields: [receiverId], references: [id])
+  status         CallStatus   @default(RINGING)
+  startedAt      DateTime?
+  endedAt        DateTime?
+  duration       Int?
+  createdAt      DateTime     @default(now())
+}
+
+enum CallStatus {
+  RINGING
+  ACCEPTED
+  REJECTED
+  MISSED
+  ENDED
 }

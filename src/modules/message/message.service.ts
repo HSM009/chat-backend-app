@@ -131,6 +131,17 @@ export async function sendMessage(
           },
         },
         reads: true,
+        deliveries: true,
+        reactions: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+          },
+        },
         mentions: {
           include: {
             user: {
@@ -159,7 +170,6 @@ export async function sendMessage(
         },
       },
     });
-    console.log(JSON.stringify(message, null, 2));
     return {
       message,
       participants,
@@ -233,6 +243,22 @@ export async function getMessages(
           readAt: true,
         },
       },
+      deliveries: {
+        select: {
+          userId: true,
+          deliveredAt: true,
+        },
+      },
+      reactions: {
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+      },
       replyTo: {
         select: {
           id: true,
@@ -297,6 +323,11 @@ export async function updateMessage(
     throw new Error("Cannot edit a deleted message.");
   }
 
+  const newText = data.text.trim();
+
+  if (message.text === newText) {
+    return message;
+  }
   const updated = await prisma.$transaction(async (tx) => {
     await tx.messageEditHistory.create({
       data: {
@@ -310,7 +341,7 @@ export async function updateMessage(
         id: messageId,
       },
       data: {
-        text: data.text,
+        text: newText,
         editedAt: new Date(),
       },
       include: {
@@ -318,6 +349,48 @@ export async function updateMessage(
           select: {
             id: true,
             name: true,
+          },
+        },
+
+        reads: true,
+
+        deliveries: true,
+
+        reactions: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+          },
+        },
+
+        mentions: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+          },
+        },
+
+        replyTo: {
+          select: {
+            id: true,
+            type: true,
+            text: true,
+            deletedAt: true,
+            fileUrl: true,
+            sender: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
           },
         },
       },
@@ -333,10 +406,16 @@ export async function updateMessage(
     },
   });
 
+  await Promise.all(
+    participants.map((participant) =>
+      invalidateUserConversations(participant.userId),
+    ),
+  );
+
   for (const participant of participants) {
-    if (participant.userId === currentUserId) {
-      continue;
-    }
+    // if (participant.userId === currentUserId) {
+    //   continue;
+    // }
 
     connectionManager.send(
       participant.userId,
@@ -344,6 +423,7 @@ export async function updateMessage(
       updated,
     );
   }
+  return updated;
 }
 
 export async function deleteMessage(currentUserId: string, messageId: string) {
@@ -392,6 +472,7 @@ export async function deleteMessage(currentUserId: string, messageId: string) {
         },
         data: {
           lastMessageAt: lastMessage?.createdAt ?? null,
+          messageId: lastMessage?.id ?? null,
         },
       });
 
@@ -425,11 +506,16 @@ export async function deleteMessage(currentUserId: string, messageId: string) {
         conversationId: message.conversationId,
         messageId: deletedMessage.id,
         deletedAt: deletedMessage.deletedAt,
+        deletedBy: currentUserId,
       },
     );
   }
 
-  return deletedMessage;
+  return {
+    id: deletedMessage.id,
+    conversationId: message.conversationId,
+    deletedAt: deletedMessage.deletedAt,
+  };
 }
 
 export async function reactToMessage(
@@ -446,30 +532,98 @@ export async function reactToMessage(
   if (!message) {
     throw new Error("Message not found.");
   }
+
   await ensureParticipant(currentUserId, message.conversationId);
 
   if (message.deletedAt) {
     throw new Error("Cannot react to a deleted message.");
   }
 
-  return prisma.messageReaction.upsert({
+  // Get participants once
+  const participants = await prisma.conversationParticipant.findMany({
+    where: {
+      conversationId: message.conversationId,
+    },
+    select: {
+      userId: true,
+    },
+  });
+
+  // Check existing reaction
+  const existingReaction = await prisma.messageReaction.findUnique({
     where: {
       messageId_userId: {
         messageId,
         userId: currentUserId,
       },
     },
+  });
 
+  // Toggle off if same emoji
+  if (existingReaction?.emoji === data.emoji) {
+    await prisma.messageReaction.delete({
+      where: {
+        messageId_userId: {
+          messageId,
+          userId: currentUserId,
+        },
+      },
+    });
+
+    for (const participant of participants) {
+      connectionManager.send(
+        participant.userId,
+        WebSocketEvents.MESSAGE_REACTION,
+        {
+          messageId,
+          userId: currentUserId,
+          emoji: data.emoji,
+          removed: true,
+        },
+      );
+    }
+
+    return {
+      removed: true,
+      emoji: data.emoji,
+    };
+  }
+
+  // Create or update
+  const reaction = await prisma.messageReaction.upsert({
+    where: {
+      messageId_userId: {
+        messageId,
+        userId: currentUserId,
+      },
+    },
     update: {
       emoji: data.emoji,
     },
-
     create: {
       messageId,
       userId: currentUserId,
       emoji: data.emoji,
     },
   });
+
+  for (const participant of participants) {
+    connectionManager.send(
+      participant.userId,
+      WebSocketEvents.MESSAGE_REACTION,
+      {
+        messageId,
+        userId: currentUserId,
+        emoji: reaction.emoji,
+        removed: false,
+      },
+    );
+  }
+
+  return {
+    removed: false,
+    reaction,
+  };
 }
 
 export async function markMessageAsRead(
@@ -885,21 +1039,17 @@ export async function markMessageDelivered(
     return null;
   }
 
-  const existing = await prisma.messageDelivery.findUnique({
+  const delivery = await prisma.messageDelivery.upsert({
     where: {
       messageId_userId: {
         messageId,
         userId: currentUserId,
       },
     },
-  });
 
-  if (existing) {
-    return existing;
-  }
+    update: {},
 
-  const delivery = await prisma.messageDelivery.create({
-    data: {
+    create: {
       messageId,
       userId: currentUserId,
     },
