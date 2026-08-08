@@ -10,21 +10,22 @@ jobs:
     runs-on: self-hosted
 
     steps:
-      - name: Deploy latest code
-        shell: bash
+      - name: Deploy backend
         run: |
           set -eux
 
-          DEPLOY_DIR="/home/hsm/chatting-app/deployments/chat-backend-app"
-          COMPOSE_DIR="/home/hsm/chatting-app/deployments"
+          DEPLOY_DIR="/workspace/deployments/chat-backend-app"
+          COMPOSE_DIR="/workspace/deployments"
 
           echo "================================="
           echo "Starting backend deployment"
           echo "================================="
 
-          cd "$DEPLOY_DIR"
+          echo "Deployment directory:"
+          ls -la "$DEPLOY_DIR"
 
           echo "Fetching latest code..."
+          cd "$DEPLOY_DIR"
           git fetch origin main
 
           echo "Updating working tree..."
@@ -39,6 +40,9 @@ jobs:
 
           echo "Checking backend..."
           docker ps --filter "name=chat-backend"
+
+          echo "Backend logs:"
+          docker logs --tail 30 chat-backend
 
           echo "================================="
           echo "Deployment completed"
